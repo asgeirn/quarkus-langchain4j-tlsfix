@@ -14,9 +14,11 @@ OpenAI client to fall back to `SSLContext.getDefault()` instead of the named
   a custom TLS bucket (`quarkus.langchain4j.openai.tls-configuration-name=custom`) whose
   trust store is `rootCA.pem`.
 - Caddy proxies onward to `https://api.openai.com`.
-- A toggle in `build.gradle.kts` (`OPENAI_COMMON_TLSFIX=true|false`, default `false`) swaps
-  between the upstream `quarkus-langchain4j-openai-common:1.8.4` jar and a locally-patched
-  `1.8.4-tlsfix` build (in `libs/`) that contains the PR #2380 fix.
+- A toggle in `code-with-quarkus/build.gradle.kts` (`OPENAI_COMMON_TLSFIX=true|false`,
+  default `false`) swaps between the upstream `quarkus-langchain4j-openai-common:1.8.4`
+  jar and a locally-patched `1.8.4-tlsfix` build that contains the PR #2380 fix. The
+  patched build is produced from the `quarkus-langchain4j/` git submodule and resolved
+  from the local Maven repository.
 
 The intent is: with the unpatched jar the call should fail with `PKIX path building
 failed`; with the patched jar it should succeed.
@@ -50,25 +52,31 @@ Two independent pitfalls make the unpatched jar appear to "just work":
    the main thread. A single `@RegisterAiService` exercising one chat model from one HTTP
    request, as in this project, does not trigger it on its own.
 
-## Files of note
+## Repository layout
 
-- `src/main/java/com/acme/Greeter.java` — the `@RegisterAiService` interface.
-- `src/main/java/com/acme/GreeterCli.java` — `GET /greet` calling the service.
-- `src/main/resources/application.properties` — custom TLS bucket configuration.
+- `code-with-quarkus/` — the Quarkus reproducer app (Gradle build).
+  - `src/main/java/com/acme/Greeter.java` — the `@RegisterAiService` interface.
+  - `src/main/java/com/acme/GreeterCli.java` — `GET /greet` calling the service.
+  - `src/main/resources/application.properties` — custom TLS bucket configuration.
+  - `build.gradle.kts` — `useTlsFix` toggle that substitutes the common artifact with
+    the locally-installed `1.8.4-tlsfix` build.
+- `quarkus-langchain4j/` — git submodule pointing at the patched
+  [asgeirn/quarkus-langchain4j](https://github.com/asgeirn/quarkus-langchain4j) fork
+  that carries the PR #2380 fix as version `1.8.4-tlsfix`. Must be installed to
+  `~/.m2` for the patched build to be resolvable.
 - `Caddyfile` / `setup.sh` / `greet.sh` — local TLS-terminating proxy and helpers.
-- `libs/quarkus-langchain4j-openai-common-1.8.4-tlsfix.jar` — locally-built jar with the
-  PR #2380 fix.
-- `build.gradle.kts` — `useTlsFix` toggle that strict-pins the common artifact to either
-  `1.8.4` or `1.8.4-tlsfix`.
 
 ## Running
 
 ```shell
-./setup.sh                # downloads caddy + mkcert, generates certs
+./setup.sh                # downloads caddy + mkcert, generates certs,
+                          # inits the submodule and installs 1.8.4-tlsfix to mavenLocal
 ./caddy run               # terminal 1
+
+cd code-with-quarkus
 OPENAI_COMMON_TLSFIX=false ./gradlew quarkusRun   # terminal 2 (unpatched)
 curl http://localhost:8080/greet
 ```
 
-Switch `OPENAI_COMMON_TLSFIX` to `true` to use the patched jar. To make the difference
-visible, first ensure the mkcert root is not in the JDK's `cacerts`.
+Switch `OPENAI_COMMON_TLSFIX` to `true` to use the patched jar from mavenLocal. To make
+the difference visible, first ensure the mkcert root is not in the JDK's `cacerts`.

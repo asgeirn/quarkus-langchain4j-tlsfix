@@ -50,6 +50,19 @@ else
     echo "Certificates already exist, skipping generation"
 fi
 
+# Build and install the patched quarkus-langchain4j to mavenLocal so the
+# OPENAI_COMMON_TLSFIX=true path can resolve 1.8.4-tlsfix.
+TLSFIX_ARTIFACT="$HOME/.m2/repository/io/quarkiverse/langchain4j/quarkus-langchain4j-openai-common/1.8.4-tlsfix"
+if [ ! -d "$TLSFIX_ARTIFACT" ]; then
+    echo "Initializing quarkus-langchain4j submodule..."
+    git submodule update --init --recursive
+
+    echo "Installing patched quarkus-langchain4j 1.8.4-tlsfix to mavenLocal (this takes a few minutes)..."
+    (cd quarkus-langchain4j && ./mvnw install -DskipTests)
+else
+    echo "Patched quarkus-langchain4j 1.8.4-tlsfix already installed in mavenLocal, skipping build"
+fi
+
 echo "=== Environment setup complete ==="
 echo "To test the bug reproduction:"
 echo ""
@@ -57,9 +70,9 @@ echo "1. In terminal 1, start Caddy:"
 echo "   ./caddy run"
 echo ""
 echo "2. In terminal 2, test WITHOUT the fix:"
-echo "   OPENAI_COMMON_TLSFIX=false ./gradlew quarkusRun"
+echo "   cd code-with-quarkus && OPENAI_COMMON_TLSFIX=false ./gradlew quarkusRun"
 echo "   Then call: curl -v http://localhost:8080/greet"
 echo ""
 echo "3. In terminal 2, test WITH the fix:"
-echo "   OPENAI_COMMON_TLSFIX=true ./gradlew quarkusRun"
+echo "   cd code-with-quarkus && OPENAI_COMMON_TLSFIX=true ./gradlew quarkusRun"
 echo "   Then call: curl -v http://localhost:8080/greet"

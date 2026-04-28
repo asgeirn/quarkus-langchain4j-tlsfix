@@ -1,0 +1,14 @@
+{
+	auto_https disable_certs
+}
+
+:10443 {
+	tls localhost.pem localhost-key.pem
+	log {
+		output file access.log
+		format console
+	}
+	reverse_proxy https://api.openai.com {
+		header_up Host api.openai.com
+	}
+}

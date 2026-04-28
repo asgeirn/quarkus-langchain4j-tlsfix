@@ -1,0 +1,3 @@
+[submodule "quarkus-langchain4j"]
+	path = quarkus-langchain4j
+	url = git@github.com:asgeirn/quarkus-langchain4j.git

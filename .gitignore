@@ -1,0 +1,8 @@
+*.pem
+
+# Binaries
+/caddy
+/mkcert
+
+# Caddy
+/access.log

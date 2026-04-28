@@ -16,6 +16,19 @@ logger.lifecycle("Using local TLS fix jar: $useTlsFix")
 
 repositories {
     mavenCentral()
+    mavenLocal()
+}
+
+if (useTlsFix) {
+    // enforcedPlatform(quarkus-bom) pins openai-common to 1.8.4 and beats a directly
+    // declared version; substitution rewrites the resolved coordinate instead.
+    configurations.all {
+        resolutionStrategy.dependencySubstitution {
+            substitute(module("io.quarkiverse.langchain4j:quarkus-langchain4j-openai-common:1.8.4"))
+                .using(module("io.quarkiverse.langchain4j:quarkus-langchain4j-openai-common:1.8.4-tlsfix"))
+                .because("local TLS fix backport, see quarkiverse/quarkus-langchain4j PR 2380")
+        }
+    }
 }
 
 dependencies {
@@ -24,15 +37,7 @@ dependencies {
     implementation(platform("${quarkusPlatformGroupId}:quarkus-langchain4j-bom:${quarkusPlatformVersion}"))
     implementation("io.quarkiverse.langchain4j:quarkus-langchain4j-core")
     implementation("io.quarkus:quarkus-rest")
-    if (useTlsFix) {
-        // Use local patched jar from libs/ directory
-        implementation(files("libs/quarkus-langchain4j-openai-common-1.8.4-tlsfix.jar"))
-        // The local JAR might need explicit dependencies
-        implementation("dev.langchain4j:langchain4j-openai:0.29.4")
-    } else {
-        // Use version from mavenCentral (managed by BOM)
-        implementation("io.quarkiverse.langchain4j:quarkus-langchain4j-openai-common")
-    }
+    implementation("io.quarkiverse.langchain4j:quarkus-langchain4j-openai-common")
     implementation("io.quarkiverse.langchain4j:quarkus-langchain4j-openai") {
         exclude(group = "io.quarkiverse.langchain4j", module = "quarkus-langchain4j-openai-common")
     }

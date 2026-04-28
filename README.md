@@ -25,32 +25,51 @@ failed`; with the patched jar it should succeed.
 
 ## Why reproducing the bug is fragile
 
-Two independent pitfalls make the unpatched jar appear to "just work":
+Two independent pitfalls can mask the bug and make the unpatched jar appear to
+"just work":
 
-1. **mkcert installs its root CA into the JDK trust store.** When `mkcert -install` runs
-   with `JAVA_HOME` set, it adds the development CA to `$JAVA_HOME/lib/security/cacerts`.
-   After that, even if `tls-configuration-name` is silently dropped and the client falls
-   back to `SSLContext.getDefault()`, the handshake still succeeds — the JDK default trust
-   store happens to contain the mkcert root.
+1. **mkcert installs its root CA into the JDK trust store.** When `mkcert -install`
+   runs with `JAVA_HOME` set, it adds the development CA to
+   `$JAVA_HOME/lib/security/cacerts`. After that, even if `tls-configuration-name` is
+   silently dropped and the client falls back to `SSLContext.getDefault()`, the
+   handshake still succeeds — the JDK default trust store now contains the mkcert
+   root, so the custom TLS bucket is no longer required for the connection to work.
 
-   To actually observe the bug, the mkcert CA must NOT be in the JDK trust store of the
-   JVM that runs the app (remove it with `keytool -delete -alias mkcert... -keystore
-   $JAVA_HOME/lib/security/cacerts -storepass changeit`, or run on a JDK where mkcert
-   never installed it).
+   `setup.sh` already guards against this by `unset JAVA_HOME` before running
+   `mkcert -install`, but if mkcert was previously installed against a JDK on this
+   machine the CA may already be in that JDK's `cacerts`. To actually observe the
+   bug, verify the mkcert root is NOT present in the cacerts of the JVM that runs
+   the app — list with `keytool -list -keystore $JAVA_HOME/lib/security/cacerts
+   -storepass changeit | grep -i mkcert`, and remove with `keytool -delete -alias
+   <alias> ...` if found, or run on a JDK where mkcert never installed it.
 
-2. **The threading bug requires a specific class-loading order.**
-   `AdditionalPropertiesHack` stores properties in a `ThreadLocal<Map>` populated by a
-   *static initializer*, so only the class-loading thread ever sees a non-null map.
-   `OpenAiRecorder` calls `builder.build()` (which is what triggers loading of
-   `AdditionalPropertiesHack`) inside the synthetic-bean creator's `Function.apply()`. With
-   only a single OpenAI model bean, class loading and bean creation happen on the same
-   thread, the `ThreadLocal` is populated, and `setTlsConfigurationName(...)` works.
+2. **The cross-thread `ThreadLocal` hack only fails when builder and client run on
+   different threads.** `AdditionalPropertiesHack` is a `ThreadLocal<Map<String,String>>`
+   created with `ThreadLocal.withInitial(HashMap::new)`, so every thread observes a
+   non-null (but initially empty) map. The flow is:
 
-   The bug surfaces when `AdditionalPropertiesHack` is loaded on thread A but bean
-   creation happens on thread B — e.g. multiple model kinds (chat + embedding +
-   streaming) created on different threads, or anything that touches the class earlier on
-   the main thread. A single `@RegisterAiService` exercising one chat model from one HTTP
-   request, as in this project, does not trigger it on its own.
+   - The model builder's `build()` (e.g. `QuarkusOpenAiChatModelBuilderFactory.Builder.build`)
+     calls `AdditionalPropertiesHack.setTlsConfigurationName(...)`, writing into the
+     map of *the calling thread*.
+   - Inside `super.build()`, the OpenAI client builder calls
+     `AdditionalPropertiesHack.getAndClearTlsConfigurationName()`, reading from the
+     map of *its calling thread*.
+
+   The class's own Javadoc concedes the assumption: *"Setting up a model builder
+   always precedes setting up a client builder on the same thread."* When that holds —
+   the typical case for a single chat model created during a single synthetic-bean
+   instantiation — the value round-trips and TLS works. When it does not (model
+   built on thread A, client constructed on thread B; lazy or deferred client
+   creation; concurrent bean creation across multiple model kinds), thread B's
+   fresh empty map yields `null`, the TLS configuration name is silently dropped,
+   and the client falls back to `SSLContext.getDefault()`.
+
+   A single `@RegisterAiService` chat model invoked from one HTTP request, as in
+   this project, will normally NOT trigger the cross-thread split on its own. To
+   observe the failure you generally need a workload that decouples the two
+   threads — e.g. multiple model kinds (chat + embedding + streaming) being
+   created concurrently, or a deployment path where client construction is
+   deferred onto a different executor.
 
 ## Repository layout
 
